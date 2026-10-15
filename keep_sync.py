@@ -7,10 +7,13 @@ of truth: if it breaks you lose speaker sync for a while, never the list.
 Per run:
   1. pull the Keep list; any unchecked item not on the canonical list was added at a
      speaker, so it is added with the stamp "speaker"
-  2. any canonical item checked off in Keep is removed from the canonical list
-  3. push the canonical list back so Keep shows exactly what the Pi has
-  4. log every difference; if step 1 would add more than HOLD_LIMIT items the run is
-     held for review (lists/shopping.review.json, a note for Claude) and nothing changes
+  2. any canonical item that was unchecked in Keep last run and is checked now was bought,
+     so it is removed from the canonical list
+  3. push the canonical list back so Keep's UNCHECKED items are exactly what the Pi has.
+     Checked-off items in Keep are history: they are never deleted, renamed or unchecked
+  4. log every difference; if step 1 would add, or step 3 would delete, more than HOLD_LIMIT
+     items the run is held for review (lists/shopping.review.json, a note for Claude) and
+     nothing changes on either side
   5. unchecked entries in the House notes list become notes in Claude's inbox, then are
      checked off in Keep
 """
@@ -36,9 +39,12 @@ log = logging.getLogger("keep_sync")
 
 # ---------- pure reconciliation, testable without Keep ----------
 
-def reconcile(canonical: list[dict], keep_items: list[dict]) -> dict:
+def reconcile(canonical: list[dict], keep_items: list[dict], last_unchecked: set[str] | None = None) -> dict:
     """canonical: rows from lists/shopping.json. keep_items: [{"id","text","checked"}].
-    Returns the changes to make on both sides."""
+    last_unchecked: keys that were unchecked in Keep at the end of the previous run; only
+    those count as "checked off since", so old checked history never vetoes a new Pi add.
+    Returns the changes to make on both sides. Checked Keep items are never touched."""
+    last_unchecked = set(last_unchecked or ())
     canon_by_key = {r["key"]: r for r in canonical}
     unchecked_by_key: dict[str, dict] = {}
     checked_keys: set[str] = set()
@@ -55,7 +61,8 @@ def reconcile(canonical: list[dict], keep_items: list[dict]) -> dict:
             unchecked_by_key[key] = it
 
     adds = [it for key, it in unchecked_by_key.items() if key not in canon_by_key]
-    removes = [canon_by_key[k] for k in checked_keys if k in canon_by_key and k not in unchecked_by_key]
+    removes = [canon_by_key[k] for k in sorted(checked_keys)
+               if k in canon_by_key and k not in unchecked_by_key and k in last_unchecked]
 
     desired = {r["key"]: r for r in canonical if r["key"] not in {x["key"] for x in removes}}
     for it in adds:
@@ -66,8 +73,10 @@ def reconcile(canonical: list[dict], keep_items: list[dict]) -> dict:
     keep_delete, keep_retext = [], []
     seen: set[str] = set()
     for it in keep_items:
+        if it["checked"]:
+            continue  # history stays exactly as it is
         key = it.get("key")
-        if key is None or it["checked"] or key not in desired or key in seen:
+        if key is None or key not in desired or key in seen:
             keep_delete.append(it)
             continue
         seen.add(key)
@@ -76,7 +85,8 @@ def reconcile(canonical: list[dict], keep_items: list[dict]) -> dict:
             keep_retext.append((it, want))
     keep_add = [desired[k] for k in desired if k not in seen]
     return {"adds": adds, "removes": removes, "keep_delete": keep_delete,
-            "keep_retext": keep_retext, "keep_add": keep_add}
+            "keep_retext": keep_retext, "keep_add": keep_add,
+            "unchecked_keys": sorted(desired)}
 
 
 # ---------- Keep access ----------
@@ -115,22 +125,27 @@ def sync_shopping(store: Store, glist) -> dict:
     with store.list_lock(LIST_NAME):
         data = store.read_list(LIST_NAME)
         items = [{"id": it.id, "text": it.text, "checked": it.checked, "node": it} for it in glist.items]
-        plan = reconcile(data["items"], items)
+        plan = reconcile(data["items"], items, set(data["keep"].get("unchecked_keys") or ()))
         review = store.lists / f"{LIST_NAME}.review.json"
 
+        too_many = {}
         if len(plan["adds"]) > HOLD_LIMIT:
-            pending = [it["text"] for it in plan["adds"]]
-            log.warning("HELD: Keep would add %d items (> %d); nothing changed. Pending: %s",
-                        len(pending), HOLD_LIMIT, pending)
+            too_many["pending_adds"] = [it["text"] for it in plan["adds"]]
+        if len(plan["keep_delete"]) > HOLD_LIMIT:
+            too_many["pending_keep_deletes"] = [it["text"] for it in plan["keep_delete"]]
+        if too_many:
+            summary = ", ".join(f"{len(v)} {k.replace('pending_', '').replace('_', ' ')}" for k, v in too_many.items())
+            log.warning("HELD: this run would make %s (limit %d per run); nothing changed on either side. %s",
+                        summary, HOLD_LIMIT, json.dumps(too_many))
             first_time = not review.exists()
-            review.write_text(json.dumps({"held_at": _now(), "reason": f"more than {HOLD_LIMIT} new items in Keep",
-                                          "pending_adds": pending}, indent=1) + "\n")
-            store.log_write("keep_sync", SPEAKER, "keep", held=len(pending))
+            review.write_text(json.dumps({"held_at": _now(), "reason": f"more than {HOLD_LIMIT} changes of one kind: {summary}",
+                                          **too_many}, indent=1) + "\n")
+            store.log_write("keep_sync", SPEAKER, "keep", held=summary)
             if first_time:
-                store.leave_note("claude", f"Keep sync held: the Grocery List in Keep has {len(pending)} items not on the "
-                                 f"canonical list (limit {HOLD_LIMIT}). See lists/shopping.review.json. Clean up the Keep "
-                                 f"list or add the items with add_item; the mirror resumes on its own.", SPEAKER, "keep")
-            return {"held": len(pending)}
+                store.leave_note("claude", f"Keep sync held: the Grocery List mirror would make {summary} in one run "
+                                 f"(limit {HOLD_LIMIT}). See lists/shopping.review.json. Fix up the Keep list or the "
+                                 f"canonical list; the mirror resumes on its own.", SPEAKER, "keep")
+            return {"held": summary}
         if review.exists():
             review.unlink()
             log.info("hold cleared")
@@ -157,10 +172,12 @@ def sync_shopping(store: Store, glist) -> dict:
         for row in plan["keep_add"]:
             log.info("keep: add %r", keep_text(row))
             glist.add(keep_text(row))
-        if changed or not data["keep"].get("list_id"):
-            data["keep"] = {"list_id": glist.id, "last_change": _now()}
+        unchecked_keys = plan["unchecked_keys"]
+        if changed or data["keep"].get("list_id") != glist.id or data["keep"].get("unchecked_keys") != unchecked_keys:
+            data["keep"] = {"list_id": glist.id, "unchecked_keys": unchecked_keys,
+                            "last_change": _now() if changed else data["keep"].get("last_change")}
             store.write_list(data)
-    return {k: len(v) for k, v in plan.items()}
+    return {k: len(v) for k, v in plan.items() if k != "unchecked_keys"}
 
 
 def ingest_notes(store: Store, nlist) -> int:
