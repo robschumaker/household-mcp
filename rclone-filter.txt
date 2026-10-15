@@ -1,5 +1,4 @@
-# rclone bisync filter for /home/pi/household <-> gdrive: (the Drive Household folder)
-# Secrets never leave the Pi.
+# rclone filter used for every transfer in sync.sh. Secrets never leave the Pi.
 - .env
 - .env.*
 - sa.json
