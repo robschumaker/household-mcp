@@ -3,14 +3,16 @@
 
 Run on the laptop:  venv/bin/python scripts/keep_login.py
 
-1. opens a fresh Chromium window (Playwright) at https://accounts.google.com/EmbeddedSetup
+1. launches the installed Brave with a throw-away profile (Playwright attached over CDP), or
+   Playwright's Firefox if Brave is missing, at https://accounts.google.com/EmbeddedSetup
 2. you sign in and click "I agree"; the script waits for the oauth_token cookie
 3. the browser is closed, the cookie is exchanged with gpsoauth for the master token
 4. KEEP_USERNAME and KEEP_MASTER_TOKEN are written into /home/pi/household/.env over SSH
    (file mode stays 600), via stdin so nothing appears on a command line
 5. prints "stored"
 
-Nothing is printed, logged or written on the laptop: the browser profile is in memory only.
+Nothing is printed, logged or left on the laptop: the temporary Brave profile is deleted on exit;
+the Firefox fallback keeps its profile in memory only.
 """
 
 from __future__ import annotations
@@ -18,8 +20,13 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
+import shutil
+import signal
+import socket
 import subprocess
 import sys
+import tempfile
 import time
 
 ANDROID_ID = "3a9f1c2b7d4e6a58"
@@ -49,31 +56,117 @@ print("ok")
 '''
 
 
-def get_oauth_cookie(timeout: int) -> str:
+BRAVE_CANDIDATES = ["brave-browser", "brave-browser-stable", "brave", "/opt/brave.com/brave/brave-browser"]
+
+
+def find_brave() -> str | None:
+    for c in BRAVE_CANDIDATES:
+        p = shutil.which(c) or (c if os.path.isabs(c) and os.access(c, os.X_OK) else None)
+        if p:
+            return p
+    return None
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _wait_for_cookie(context, page, timeout: int) -> str:
+    print("Sign in to Google in the window that just opened, then click 'I agree'. Waiting...", file=sys.stderr)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for c in context.cookies():
+            if c.get("name") == "oauth_token" and c.get("value"):
+                return c["value"]
+        if page.is_closed():
+            raise SystemExit("browser window was closed before sign-in finished")
+        page.wait_for_timeout(1000)
+    raise SystemExit("timed out waiting for sign-in")
+
+
+def cookie_via_brave(brave: str, timeout: int) -> str:
+    """Real Brave with a throw-away profile, driven over the DevTools protocol."""
+    from playwright.sync_api import sync_playwright
+
+    profile = tempfile.mkdtemp(prefix="keep-login-")
+    port = _free_port()
+    proc = subprocess.Popen(
+        [brave, f"--user-data-dir={profile}", f"--remote-debugging-port={port}",
+         "--no-first-run", "--no-default-browser-check", "--disable-sync", "--new-window", "about:blank"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True,  # own process group: brave-browser is a wrapper that execs the real binary
+    )
+    try:
+        with sync_playwright() as p:
+            browser = None
+            for _ in range(60):
+                try:
+                    browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{port}")
+                    break
+                except Exception:
+                    if proc.poll() is not None:
+                        raise SystemExit("Brave exited before the DevTools port came up")
+                    time.sleep(0.5)
+            if browser is None:
+                raise SystemExit("could not connect to Brave over CDP")
+            context = browser.contexts[0] if browser.contexts else browser.new_context()
+            page = context.pages[0] if context.pages else context.new_page()
+            page.goto(SETUP_URL, wait_until="domcontentloaded")
+            try:
+                return _wait_for_cookie(context, page, timeout)
+            finally:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+    finally:
+        _stop_group(proc)
+        shutil.rmtree(profile, ignore_errors=True)
+
+
+def _stop_group(proc: subprocess.Popen) -> None:
+    """Terminate the browser and every helper process in its group, then wait for them to go."""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(proc.pid, sig)
+        except ProcessLookupError:
+            return
+        for _ in range(50):
+            try:
+                os.killpg(proc.pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.2)
+
+
+def cookie_via_firefox(timeout: int) -> str:
+    """Fallback: Playwright's Firefox with an in-memory profile."""
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context()  # in-memory profile: nothing persists on disk
+        browser = p.firefox.launch(headless=False)
+        context = browser.new_context()
         page = context.new_page()
         page.goto(SETUP_URL, wait_until="domcontentloaded")
-        print("Sign in to Google in the window that just opened, then click 'I agree'. Waiting...", file=sys.stderr)
-        deadline = time.time() + timeout
         try:
-            while time.time() < deadline:
-                for c in context.cookies():
-                    if c.get("name") == "oauth_token" and c.get("value"):
-                        return c["value"]
-                if page.is_closed():
-                    raise SystemExit("browser window was closed before sign-in finished")
-                page.wait_for_timeout(1000)
-            raise SystemExit("timed out waiting for sign-in")
+            return _wait_for_cookie(context, page, timeout)
         finally:
             try:
                 context.close()
                 browser.close()
             except Exception:
                 pass
+
+
+def get_oauth_cookie(timeout: int) -> str:
+    brave = find_brave()
+    if brave:
+        print(f"using Brave at {brave}", file=sys.stderr)
+        return cookie_via_brave(brave, timeout)
+    print("Brave not found; using Playwright Firefox", file=sys.stderr)
+    return cookie_via_firefox(timeout)
 
 
 def install_on_pi(host: str, env_path: str, email: str, token: str) -> None:
