@@ -123,7 +123,11 @@ def cookie_via_brave(brave: str, timeout: int) -> str:
                     pass
     finally:
         _stop_group(proc)
-        shutil.rmtree(profile, ignore_errors=True)
+        for _ in range(10):  # Brave may still be flushing the profile as it dies
+            shutil.rmtree(profile, ignore_errors=True)
+            if not os.path.exists(profile):
+                break
+            time.sleep(0.5)
 
 
 def _stop_group(proc: subprocess.Popen) -> None:
