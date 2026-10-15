@@ -249,3 +249,141 @@ class Store:
         if notes and not peek:
             self.log_write("inbox", user, assistant, cleared=[n.get("id") for n in notes])
         return {"assistant": assistant, "count": len(notes), "peeked": bool(peek), "notes": notes}
+
+
+# ---------- lists (phase 2) ----------
+
+import fcntl
+from contextlib import contextmanager
+
+LIST_NAMES = ("shopping",)
+MAX_QTY = 12
+ITEM_RE = re.compile(r"^[^\x00-\x1f]{1,120}$")
+QTY_SUFFIX_RE = re.compile(r"^(.*?)\s*[x×]\s*(\d{1,3})$", re.IGNORECASE)
+
+
+def normalize_item(text: str) -> tuple[str, str]:
+    """Return (display, key): whitespace collapsed, display case kept, key lower-cased."""
+    display = re.sub(r"\s+", " ", (text or "")).strip()
+    if not display or not ITEM_RE.match(display):
+        raise StoreError("item must be 1-120 printable characters")
+    return display, display.lower()
+
+
+def parse_keep_text(text: str) -> tuple[str, int]:
+    """'Milk x3' -> ('Milk', 3); 'Milk' -> ('Milk', 1)."""
+    m = QTY_SUFFIX_RE.match((text or "").strip())
+    if m and m.group(1).strip():
+        return m.group(1).strip(), max(1, int(m.group(2)))
+    return (text or "").strip(), 1
+
+
+def keep_text(item: dict) -> str:
+    return item["item"] if item.get("qty", 1) <= 1 else f"{item['item']} x{item['qty']}"
+
+
+def _list_name(name: str) -> str:
+    n = (name or "").strip().lower()
+    if n not in LIST_NAMES:
+        raise StoreError(f"unknown list {name!r}; lists: {', '.join(LIST_NAMES)}")
+    return n
+
+
+class _ListMixin:
+    @contextmanager
+    def list_lock(self, name: str):
+        """Cross-process lock shared by the server and keep_sync.py."""
+        lock = self.lists / f".{name}.lock"
+        with open(lock, "w") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+
+    def read_list(self, name: str) -> dict:
+        name = _list_name(name)
+        path = self.lists / f"{name}.json"
+        if not path.exists():
+            return {"list": name, "items": [], "keep": {}}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8") or "{}")
+        except json.JSONDecodeError:
+            raise StoreError(f"lists/{name}.json is not valid JSON; fix it by hand")
+        data.setdefault("list", name)
+        data.setdefault("items", [])
+        data.setdefault("keep", {})
+        return data
+
+    def write_list(self, data: dict) -> None:
+        path = self.lists / f"{data['list']}.json"
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+
+    @staticmethod
+    def _view(data: dict, note: str | None = None) -> dict:
+        out = {
+            "list": data["list"],
+            "count": len(data["items"]),
+            "items": [{"item": i["item"], "qty": i.get("qty", 1), "added_by": i.get("added_by", "?"),
+                       "added": i.get("added", "?")} for i in data["items"]],
+        }
+        if note:
+            out["note"] = note
+        return out
+
+    def get_list(self, name: str) -> dict:
+        with self._lock, self.list_lock(_list_name(name)):
+            return self._view(self.read_list(name))
+
+    def add_item(self, name: str, item: str, qty, by: str) -> dict:
+        name = _list_name(name)
+        display, key = normalize_item(item)
+        try:
+            qty = int(qty)
+        except (TypeError, ValueError):
+            raise StoreError("qty must be a whole number from 1 to 12")
+        if qty < 1:
+            raise StoreError("qty must be at least 1; use remove_item to take something off")
+        note = None
+        if qty > MAX_QTY:
+            note = f"qty {qty} capped at {MAX_QTY}"
+            qty = MAX_QTY
+        with self._lock, self.list_lock(name):
+            data = self.read_list(name)
+            today = _today()
+            for row in data["items"]:
+                if row["key"] == key:
+                    new_qty = min(MAX_QTY, row.get("qty", 1) + qty)
+                    if new_qty == MAX_QTY and row.get("qty", 1) + qty > MAX_QTY:
+                        note = f"{row['item']} already listed; qty capped at {MAX_QTY}"
+                    else:
+                        note = f"{row['item']} already listed; qty bumped to {new_qty}"
+                    row["qty"], row["updated"], row["updated_by"] = new_qty, today, by
+                    break
+            else:
+                data["items"].append({"item": display, "key": key, "qty": qty, "added_by": by, "added": today})
+            self.write_list(data)
+        self.log_write("add_item", *by.split("/", 1) if "/" in by else (by, "-"), list=name, item=display, qty=qty)
+        return self._view(data, note)
+
+    def remove_item(self, name: str, item: str, by: str) -> dict:
+        name = _list_name(name)
+        _display, key = normalize_item(item)
+        with self._lock, self.list_lock(name):
+            data = self.read_list(name)
+            keep = [r for r in data["items"] if r["key"] != key]
+            removed = [r["item"] for r in data["items"] if r["key"] == key]
+            if removed:
+                data["items"] = keep
+                self.write_list(data)
+        if removed:
+            self.log_write("remove_item", *by.split("/", 1) if "/" in by else (by, "-"), list=name, item=removed[0])
+            return self._view(data, f"removed {removed[0]}")
+        return self._view(data, f"{item.strip()!r} was not on the list; nothing changed")
+
+
+for _k, _v in list(vars(_ListMixin).items()):
+    if not _k.startswith("__"):
+        setattr(Store, _k, _v)

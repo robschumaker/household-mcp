@@ -1,0 +1,12 @@
+[Unit]
+Description=Household shopping list <-> Google Keep mirror
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/household-mcp
+Environment=ENV_FILE=/home/pi/household/.env
+ExecStart=/home/pi/household-mcp/venv/bin/python /home/pi/household-mcp/keep_sync.py

@@ -30,9 +30,10 @@ auth = build_auth(cfg)
 mcp = FastMCP(
     name="Household",
     instructions=(
-        "Shared household memory for the owner's Claude and the partner's ChatGPT. Start with inbox and recall; "
+        "Shared household memory and lists for the owner's Claude and the partner's ChatGPT. Start with inbox and recall; "
         "record decisions and new facts with remember; use leave_note to tell the other assistant "
-        "about changes. Topics are short hyphenated names such as europe-trip, household, people."
+        "about changes. Topics are short hyphenated names such as europe-trip, household, people. "
+        "The shopping list: add_item, remove_item, get_list; always report the full list a write returns."
     ),
     auth=auth,
 )
@@ -123,9 +124,34 @@ async def inbox(peek: bool = False) -> dict:
     return _wrap(store.inbox, c.assistant, peek, c.user)
 
 
+@mcp.tool
+async def add_item(list: str, item: str, qty: int = 1) -> dict:
+    """Add an item to a household list (lists: shopping). qty defaults to 1 and is capped
+    at 12; an item already on the list is merged and its qty bumped rather than duplicated.
+    Returns the full list after the write; report that list back."""
+    c = await _caller()
+    return _wrap(store.add_item, list, item, qty, f"{c.user}/{c.assistant}")
+
+
+@mcp.tool
+async def remove_item(list: str, item: str) -> dict:
+    """Remove an item from a household list, matched case-insensitively. No match returns the
+    list unchanged with a note. Returns the full list after the write."""
+    c = await _caller()
+    return _wrap(store.remove_item, list, item, f"{c.user}/{c.assistant}")
+
+
+@mcp.tool
+async def get_list(list: str) -> dict:
+    """Read a household list (lists: shopping) with quantities and who added what.
+    This is the canonical copy on the Pi, not the Google Keep mirror."""
+    await _caller()
+    return _wrap(store.get_list, list)
+
+
 @mcp.custom_route("/health", methods=["GET"], include_in_schema=False)
 async def health(_: Request):
-    return JSONResponse({"ok": True, "name": "household-mcp", "phase": 1})
+    return JSONResponse({"ok": True, "name": "household-mcp", "phase": 2})
 
 
 @mcp.custom_route("/documents/{name:path}", methods=["GET"], include_in_schema=False)

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Keep mirror every 5 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+RandomizedDelaySec=20s
+Unit=household-keep.service
+
+[Install]
+WantedBy=timers.target

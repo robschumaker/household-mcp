@@ -90,8 +90,8 @@ def authenticated(base, token, other_token=None):
     check("initialize", s == 200 and "result" in (r or {}), f"status {s}")
     s, r = m.rpc("tools/list")
     names = sorted(t["name"] for t in (r or {}).get("result", {}).get("tools", []))
-    want = ["get_document", "inbox", "leave_note", "list_topics", "recall", "remember"]
-    check("tools/list has the six phase-1 tools", names == want, ", ".join(names))
+    want = ["add_item", "get_document", "get_list", "inbox", "leave_note", "list_topics", "recall", "remember", "remove_item"]
+    check("tools/list has the nine phase-1 + phase-2 tools", names == want, ", ".join(names))
     sch = {t["name"]: t["inputSchema"] for t in (r or {}).get("result", {}).get("tools", [])}
     check("leave_note takes `for` and `text`", set(sch.get("leave_note", {}).get("properties", {})) == {"for", "text"})
 
@@ -117,6 +117,30 @@ def authenticated(base, token, other_token=None):
     check("leave_note rejects unknown assistant", bool(err), err or "accepted")
     s, out, err = m.call("inbox", {"peek": True})
     check("inbox peek works", not err and out and "notes" in out, err or f"as {out and out['assistant']}: {out and out['count']} notes")
+
+    # phase 2: lists
+    s, out, err = m.call("remove_item", {"list": "shopping", "item": "Smoke Cola"})
+    s, out, err = m.call("add_item", {"list": "shopping", "item": "  Smoke   Cola ", "qty": 2})
+    row = next((i for i in (out or {}).get("items", []) if i["item"] == "Smoke Cola"), None)
+    check("add_item normalises and stores qty", not err and row and row["qty"] == 2 and "/" in row["added_by"], err or str(out))
+    s, out, err = m.call("add_item", {"list": "shopping", "item": "smoke cola", "qty": 11})
+    row = next((i for i in (out or {}).get("items", []) if i["item"] == "Smoke Cola"), None)
+    n = sum(1 for i in (out or {}).get("items", []) if i["item"].lower() == "smoke cola")
+    check("add_item merges case-insensitively and caps at 12", not err and row and row["qty"] == 12 and n == 1, err or f"qty={row and row['qty']} rows={n}")
+    s, out, err = m.call("add_item", {"list": "shopping", "item": "Smoke Water", "qty": 99})
+    row = next((i for i in (out or {}).get("items", []) if i["item"] == "Smoke Water"), None)
+    check("add_item caps a new qty of 99 at 12", not err and row and row["qty"] == 12 and "capped" in (out.get("note") or ""), err or str(out))
+    s, out, err = m.call("add_item", {"list": "shopping", "item": "x", "qty": 0})
+    check("add_item rejects qty 0", bool(err), err or "accepted")
+    s, out, err = m.call("add_item", {"list": "chores", "item": "x"})
+    check("add_item rejects an unknown list", bool(err) and "shopping" in err, err or "accepted")
+    s, out, err = m.call("get_list", {"list": "shopping"})
+    check("get_list returns the canonical list", not err and out and out["count"] >= 2, err or "")
+    s, out, err = m.call("remove_item", {"list": "shopping", "item": "SMOKE COLA"})
+    check("remove_item matches case-insensitively", not err and out and not any(i["item"] == "Smoke Cola" for i in out["items"]), err or "")
+    s, out, err = m.call("remove_item", {"list": "shopping", "item": "Smoke Cola"})
+    check("remove_item of a missing item returns the list with a note", not err and out and "not on the list" in (out.get("note") or ""), err or str(out))
+    s, out, err = m.call("remove_item", {"list": "shopping", "item": "Smoke Water"})
 
     if other_token:
         o = Mcp(base, other_token)
