@@ -30,9 +30,9 @@ def http(method, url, body=None, headers=None):
     req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
-            return r.status, dict(r.headers), r.read()
+            return r.status, {k.lower(): v for k, v in r.headers.items()}, r.read()
     except urllib.error.HTTPError as e:
-        return e.code, dict(e.headers), e.read()
+        return e.code, {k.lower(): v for k, v in e.headers.items()}, e.read()
 
 
 class Mcp:
@@ -80,7 +80,7 @@ def unauthenticated(base):
         check("OAuth protected-resource metadata", ok, f"status {s}")
     s, h, _ = http("POST", base + "/mcp", {"jsonrpc": "2.0", "id": 1, "method": "ping"},
                    {"content-type": "application/json", "accept": "application/json, text/event-stream"})
-    check("POST /mcp without token is 401", s == 401, f"status {s}, WWW-Authenticate={h.get('WWW-Authenticate', h.get('www-authenticate'))}")
+    check("POST /mcp without token is 401", s == 401, f"status {s}, WWW-Authenticate={h.get('www-authenticate')}")
 
 
 def authenticated(base, token, other_token=None):

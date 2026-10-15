@@ -6,8 +6,8 @@ STORE=${STORE_DIR:-/home/pi/household}
 REMOTE=${SYNC_REMOTE:-gdrive:}
 HERE=$(cd "$(dirname "$0")" && pwd)
 FILTER="$HERE/rclone-filter.txt"
-LOG="$STORE/log/sync.log"
-mkdir -p "$STORE"/{memory,documents,inbox,lists,log}
+LOG="$HERE/data/sync.log"   # outside the store so the mirror never syncs its own log
+mkdir -p "$STORE"/{memory,documents,inbox,lists,log} "$HERE/data"
 
 exec rclone bisync "$STORE" "$REMOTE" \
   --filters-file "$FILTER" \

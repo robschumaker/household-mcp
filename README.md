@@ -42,4 +42,4 @@ ssh pi@raspberrypi 'cd household-mcp && ./sync.sh --resync'   # first Drive mirr
 venv/bin/python smoke_test.py --url https://raspberrypi.tail1234.ts.net
 ```
 
-Logs: `journalctl -u household-mcp -f` on the Pi; the mirror writes `/home/pi/household/log/sync.log`.
+Logs: `journalctl -u household-mcp -f` on the Pi; the mirror writes `/home/pi/household-mcp/data/sync.log`.
