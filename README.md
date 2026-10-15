@@ -12,7 +12,7 @@ A household memory server on the Raspberry Pi: one MCP endpoint that the owner's
 | `sync.sh`, `rclone-filter.txt` | `rclone bisync /home/pi/household gdrive:`; `.env`, `sa.json` and `secrets/` never leave the Pi |
 | `systemd/` | `household-mcp.service`, `household-sync.service` + `household-sync.timer` (every 5 min) |
 | `keep_sync.py` | Google Keep mirror of the shopping list and the House notes dictation inbox, run by `household-keep.timer` every 5 min |
-| `scripts/keep_token.py` | One-time, run by the owner on the Pi: exchanges an oauth_token cookie for the Keep master token and writes it into `.env` |
+| `scripts/keep_login.py` | One-time, run by the owner on the laptop: opens a Chromium window for Google sign-in, exchanges the oauth_token cookie for the Keep master token, installs it into the Pi's `.env` over SSH |
 | `tests_keep_sync.py` | Fake-Keep unit test for the reconciliation, the 20-item hold and the notes ingest |
 | `install.sh` | Deploy from the laptop: rsync, venv, units, restart |
 | `smoke_test.py` | Standard-library checks against a running server (see its docstring) |
@@ -51,8 +51,8 @@ venv/bin/python smoke_test.py --url https://raspberrypi.tail1234.ts.net
 
 Logs: `journalctl -u household-mcp -f` on the Pi; the Drive mirror writes `data/sync.log`, the Keep mirror `data/keep_sync.log` and `journalctl -u household-keep`.
 
-Keep token, once, on the Pi as pi:
+Keep token, once, on the laptop (needs `pip install -r requirements-laptop.txt` and `playwright install chromium`):
 
 ```bash
-cd /home/pi/household-mcp && venv/bin/python scripts/keep_token.py
+cd ~/household-mcp && venv/bin/python scripts/keep_login.py
 ```

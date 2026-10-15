@@ -1,0 +1,2 @@
+playwright>=1.47
+gpsoauth==2.0.0
