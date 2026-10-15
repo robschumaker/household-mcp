@@ -21,6 +21,7 @@ mkdir -p "$STORE"/{memory,documents,inbox,lists,log} "$HERE/data"
 rc=0
 
 for d in memory inbox lists; do
+  [ -e "$STORE/$d/.keep" ] || : > "$STORE/$d/.keep"   # bisync refuses to sync a directory with no files
   rclone mkdir "$MIRROR/$d" --log-file "$LOG" --log-level INFO   # bisync needs both sides to exist
   rclone bisync "$STORE/$d" "$MIRROR/$d" \
     --filters-file "$FILTER" --create-empty-src-dirs \
