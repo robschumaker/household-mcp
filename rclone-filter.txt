@@ -1,0 +1,13 @@
+# rclone bisync filter for /home/pi/household <-> gdrive: (the Drive Household folder)
+# Secrets never leave the Pi.
+- .env
+- .env.*
+- sa.json
+- secrets/**
+# scratch and local-only files
+- .index*
+- *.lock
+- *.tmp
+- .~lock.*
+- __pycache__/**
+- .Trash*/**

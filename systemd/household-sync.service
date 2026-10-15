@@ -1,0 +1,11 @@
+[Unit]
+Description=Household store <-> Google Drive mirror (rclone bisync)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/household-mcp
+ExecStart=/home/pi/household-mcp/sync.sh

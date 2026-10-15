@@ -1,0 +1,19 @@
+[Unit]
+Description=Household MCP server (phase 1)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/household-mcp
+Environment=ENV_FILE=/home/pi/household/.env
+Environment=FASTMCP_HOME=/home/pi/household-mcp/data
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/pi/household-mcp/venv/bin/python /home/pi/household-mcp/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
