@@ -6,7 +6,8 @@ of truth: if it breaks you lose speaker sync for a while, never the list.
 
 Per run:
   1. pull the Keep list; any unchecked item not on the canonical list was added at a
-     speaker, so it is added with the stamp "speaker"
+     speaker, so it is added with the stamp "speaker"; unless it was unchecked last run,
+     in which case it was removed on the Pi (remove_item) and is checked off in Keep instead
   2. any canonical item that was unchecked in Keep last run and is checked now was bought,
      so it is removed from the canonical list
   3. push the canonical list back so Keep's UNCHECKED items are exactly what the Pi has.
@@ -60,7 +61,10 @@ def reconcile(canonical: list[dict], keep_items: list[dict], last_unchecked: set
         elif key not in unchecked_by_key:
             unchecked_by_key[key] = it
 
-    adds = [it for key, it in unchecked_by_key.items() if key not in canon_by_key]
+    # Unchecked in Keep but gone from the Pi: if it was unchecked last run too, the Pi removed it
+    # (remove_item), so check it off in Keep; otherwise it is new at a speaker.
+    adds = [it for key, it in unchecked_by_key.items() if key not in canon_by_key and key not in last_unchecked]
+    keep_check = [it for key, it in unchecked_by_key.items() if key not in canon_by_key and key in last_unchecked]
     removes = [canon_by_key[k] for k in sorted(checked_keys)
                if k in canon_by_key and k not in unchecked_by_key and k in last_unchecked]
 
@@ -72,8 +76,9 @@ def reconcile(canonical: list[dict], keep_items: list[dict], last_unchecked: set
 
     keep_delete, keep_retext = [], []
     seen: set[str] = set()
+    checking = {id(it) for it in keep_check}
     for it in keep_items:
-        if it["checked"]:
+        if it["checked"] or id(it) in checking:
             continue  # history stays exactly as it is
         key = it.get("key")
         if key is None or key not in desired or key in seen:
@@ -84,7 +89,7 @@ def reconcile(canonical: list[dict], keep_items: list[dict], last_unchecked: set
         if it["text"].strip() != want:
             keep_retext.append((it, want))
     keep_add = [desired[k] for k in desired if k not in seen]
-    return {"adds": adds, "removes": removes, "keep_delete": keep_delete,
+    return {"adds": adds, "removes": removes, "keep_check": keep_check, "keep_delete": keep_delete,
             "keep_retext": keep_retext, "keep_add": keep_add,
             "unchecked_keys": sorted(desired)}
 
@@ -163,6 +168,9 @@ def sync_shopping(store: Store, glist) -> dict:
             store.log_write("remove_item", SPEAKER, "keep", list=LIST_NAME, item=row["item"], via="checked in Keep")
             log.info("checked off in Keep, removed: %s", row["item"])
             changed = True
+        for it in plan["keep_check"]:
+            log.info("keep: check off %r (removed on the Pi)", it["text"])
+            it["node"].checked = True
         for it in plan["keep_delete"]:
             log.info("keep: delete %r%s", it["text"], " (checked)" if it["checked"] else "")
             it["node"].delete()

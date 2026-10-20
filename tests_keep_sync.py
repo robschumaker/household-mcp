@@ -44,7 +44,7 @@ def fresh_store():
 def review_exists(s): return (s.lists / "shopping.review.json").exists()
 def items(s): return {i["item"] for i in s.get_list("shopping")["items"]}
 
-NOOP = {"adds": 0, "removes": 0, "keep_delete": 0, "keep_retext": 0, "keep_add": 0}
+NOOP = {"adds": 0, "removes": 0, "keep_check": 0, "keep_delete": 0, "keep_retext": 0, "keep_add": 0}
 
 # --- basic reconciliation -------------------------------------------------------------
 store = fresh_store()
@@ -86,6 +86,28 @@ store = fresh_store()
 d = store.read_list("shopping"); d["keep"]["unchecked_keys"] = []; store.write_list(d)
 r = keep_sync.sync_shopping(store, FakeList([("Milk", True), ("Eggs", True), ("Bread", True)]))
 check("checked items with no unchecked history do not remove Pi items", r["removes"] == 0 and items(store) == {"Milk", "Eggs", "Bread"}, str(r))
+
+# --- remove_item on the Pi checks the item off in Keep -------------------------------
+store = fresh_store()
+gl = FakeList([("Milk x2", False), ("Eggs", False), ("Bread", False), ("Old thing", True)])
+check("in sync to start", keep_sync.sync_shopping(store, gl) == NOOP)
+store.remove_item("shopping", "bread", "owner/claude")
+r = keep_sync.sync_shopping(store, gl)
+check("Pi removal is checked off in Keep, not re-added", r["keep_check"] == 1 and r["adds"] == 0 and r["keep_delete"] == 0, str(r))
+check("Bread is checked in Keep and stays off the Pi", ("Bread", True) in gl.state() and "Bread" not in items(store), str(gl.state()))
+check("next run is a no-op", keep_sync.sync_shopping(store, gl) == NOOP)
+check("Bread not resurrected", "Bread" not in items(store))
+# a duplicate unchecked twin of a removed item is still deleted as a stray
+store = fresh_store()
+gl = FakeList([("Milk x2", False), ("Eggs", False), ("Bread", False), ("bread", False)])
+store.remove_item("shopping", "Bread", "owner/claude")
+r = keep_sync.sync_shopping(store, gl)
+check("removed item: first twin checked, stray twin deleted", r["keep_check"] == 1 and r["keep_delete"] == 1 and gl.state() == [("Bread", True), ("Eggs", False), ("Milk x2", False)], str(gl.state()))
+# speaker re-adds the same item later: it is a fresh add, not a removal echo
+r = keep_sync.sync_shopping(store, gl)
+gl.add("Bread")
+r = keep_sync.sync_shopping(store, gl)
+check("speaker re-add after a Pi removal lands as a new item", r["adds"] == 1 and "Bread" in items(store), str(r))
 
 # --- addition hold ------------------------------------------------------------------
 store = fresh_store()
