@@ -15,7 +15,7 @@ Per run:
   4. log every difference; if step 1 would add, or step 3 would delete, more than HOLD_LIMIT
      items the run is held for review (lists/shopping.review.json, a note for Claude) and
      nothing changes on either side
-  5. unchecked entries in the House notes list become notes in Claude's inbox, then are
+  5. unchecked entries in the House notes list become notes in Claude Code's inbox, then are
      checked off in Keep
 """
 
@@ -195,12 +195,12 @@ def ingest_notes(store: Store, nlist) -> int:
         if not text:
             continue
         try:
-            note = store.leave_note("claude", text, SPEAKER, "keep")
+            note = store.leave_note("claude-code", text, SPEAKER, "keep")
         except StoreError as e:
             log.warning("skipped House notes entry: %s", e)
             continue
         it.checked = True
-        log.info("note for claude %s: %s", note["id"], text[:80])
+        log.info("note for claude-code %s: %s", note["id"], text[:80])
         n += 1
     return n
 

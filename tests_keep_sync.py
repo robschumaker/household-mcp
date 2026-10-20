@@ -141,8 +141,8 @@ check("deletion hold cleared", not review_exists(store))
 store = fresh_store()
 nl = FakeList([("buy stamps", False), ("already done", True), ("   ", False)])
 n = keep_sync.ingest_notes(store, nl)
-inbox = store.inbox("claude", peek=True, user="t")
-check("House notes ingested into claude inbox and checked off",
+inbox = store.inbox("claude-code", peek=True, user="t")
+check("House notes ingested into claude-code inbox and checked off",
       n == 1 and inbox["count"] == 1 and inbox["notes"][0]["from"] == "speaker/keep"
       and nl.state() == [("   ", False), ("already done", True), ("buy stamps", True)], str(nl.state()))
 
