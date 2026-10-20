@@ -19,6 +19,8 @@ A household memory server on the Raspberry Pi: one MCP endpoint that the owner's
 
 Tools: `recall`, `remember`, `list_topics`, `get_document`, `leave_note`, `inbox`, and for lists `add_item`, `remove_item`, `get_list`. Every stored line looks like `- [2026-10-15 owner/claude] fact`.
 
+Three assistants have inboxes: `claude` (the owner's claude.ai Claude: trips, itinerary, household plans), `chatgpt` (the partner's) and `claude-code` (Claude Code on the owner's laptop: the Pi, this server, laptop work). claude.ai and Claude Code arrive through the same claude.ai connector, so the server reads the MCP `clientInfo` first and otherwise cannot tell them apart; Claude Code therefore calls `inbox` with `assistant=claude-code` and leaves notes addressed to `claude` alone. A Claude-family caller may read either Claude inbox; ChatGPT only its own.
+
 Lists live in `lists/shopping.json` (the only list for now). `qty` is capped at 12, an existing item merges and bumps its count, names are matched case-insensitively, and every write returns the full list.
 
 The Keep mirror treats Keep as a mirror, never the source of truth. Each run: items added at a speaker join the canonical list with the stamp `speaker`; items checked off in Keep are removed; then Keep is rewritten to match the Pi (qty shows as `Milk x2`). More than 20 new items in one run is held instead: `lists/shopping.review.json` is written, Claude gets one inbox note, and nothing changes until Keep is cleaned up. Unchecked entries in the `House notes` list become notes in Claude's inbox and are checked off. Until `KEEP_MASTER_TOKEN` is set the timer run exits 0 doing nothing.

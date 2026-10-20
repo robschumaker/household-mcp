@@ -30,9 +30,10 @@ auth = build_auth(cfg)
 mcp = FastMCP(
     name="Household",
     instructions=(
-        "Shared household memory and lists for the owner's Claude and the partner's ChatGPT. Start with inbox and recall; "
-        "record decisions and new facts with remember; use leave_note to tell the other assistant "
-        "about changes. Topics are short hyphenated names such as europe-trip, household, people. "
+        "Shared household memory and lists for the owner's Claude, the partner's ChatGPT and Claude Code on the owner's laptop. "
+        "Start with inbox and recall; record decisions and new facts with remember; use leave_note to tell "
+        "another assistant about changes (for=claude: the owner's claude.ai Claude, trips and household plans; "
+        "for=claude-code: Claude Code, the Pi and laptop work; for=chatgpt: the partner's assistant). Topics are short hyphenated names such as europe-trip, household, people. "
         "The shopping list: add_item, remove_item, get_list; always report the full list a write returns."
     ),
     auth=auth,
@@ -105,23 +106,36 @@ async def get_document(name: str) -> dict:
 
 @mcp.tool
 async def leave_note(
-    for_: Annotated[Literal["claude", "chatgpt"], Field(alias="for", description="which assistant the note is for")],
+    for_: Annotated[Literal["claude", "chatgpt", "claude-code"], Field(
+        alias="for",
+        description="which assistant the note is for: claude (the owner's claude.ai Claude: trips, itinerary, "
+                    "household plans), chatgpt (the partner's assistant), claude-code (Claude Code on the owner's laptop: "
+                    "the Pi, this server, laptop work)")],
     text: Annotated[str, Field(description="the note, at most 2000 characters")],
 ) -> dict:
-    """Leave a note for the other assistant (for = claude or chatgpt). It lands in that
-    assistant's inbox. Returns the stored note with its id and attribution."""
+    """Leave a note for another assistant (for = claude, chatgpt or claude-code). It lands in
+    that assistant's inbox. Returns the stored note with its id and attribution."""
     c = await _caller()
     return _wrap(store.leave_note, for_, text, c.user, c.assistant)
 
 
 @mcp.tool
-async def inbox(peek: bool = False) -> dict:
+async def inbox(
+    peek: bool = False,
+    assistant: Annotated[Literal["claude", "chatgpt", "claude-code"] | None, Field(
+        description="which inbox to read; defaults to the calling assistant's. Claude Code must pass "
+                    "claude-code, because it reaches this server through the same connector as claude.ai")] = None,
+) -> dict:
     """Read unread notes left for the calling assistant, oldest first. Notes are cleared
-    once read; pass peek=true to look without clearing."""
+    once read; pass peek=true to look without clearing. Claude Code passes assistant=claude-code;
+    notes addressed to claude belong to the owner's claude.ai Claude and should be left for it."""
     c = await _caller()
-    if c.assistant not in ASSISTANTS:
-        raise ToolError("could not tell which assistant is calling, so there is no inbox to read")
-    return _wrap(store.inbox, c.assistant, peek, c.user)
+    which = assistant or c.assistant
+    if which not in ASSISTANTS:
+        raise ToolError("could not tell which assistant is calling; pass assistant=claude, chatgpt or claude-code")
+    if not c.may_read_inbox(which):
+        raise ToolError(f"the {which} inbox is not yours to read (you are {c.assistant})")
+    return _wrap(store.inbox, which, peek, c.user)
 
 
 @mcp.tool

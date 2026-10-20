@@ -13,9 +13,9 @@ from starlette.responses import JSONResponse
 
 from fastmcp.server.auth import TokenVerifier
 from fastmcp.server.auth.auth import AccessToken
-from fastmcp.server.dependencies import get_access_token, get_http_headers
+from fastmcp.server.dependencies import get_access_token, get_context, get_http_headers
 
-from store import ASSISTANTS
+from store import ASSISTANTS, CLAUDE_FAMILY
 
 REQUIRED_SCOPES = ["openid", "email"]  # the only two the OAuth app asks Google for
 
@@ -157,8 +157,17 @@ class Caller:
     def __init__(self, email: str, user: str, assistant: str, how: str):
         self.email, self.user, self.assistant, self.how = email, user, assistant, how
 
+    def may_read_inbox(self, assistant: str) -> bool:
+        """A Claude-family caller may read either Claude inbox (claude.ai and Claude Code reach
+        the Pi through the same connector, so the server cannot always tell them apart);
+        everyone else only their own."""
+        if assistant == self.assistant:
+            return True
+        return self.assistant in CLAUDE_FAMILY and assistant in CLAUDE_FAMILY
+
 
 _client_names: dict[str, str | None] = {}
+_seen_hints: set[tuple] = set()
 
 
 def _classify(*hints: str | None) -> str | None:
@@ -166,11 +175,26 @@ def _classify(*hints: str | None) -> str | None:
         h = (h or "").lower()
         if not h:
             continue
+        if "claude-code" in h or "claude code" in h or "claude_code" in h:
+            return "claude-code"
         if "claude" in h or "anthropic" in h:
             return "claude"
         if "chatgpt" in h or "openai" in h:
             return "chatgpt"
     return None
+
+
+def _mcp_client_info() -> str | None:
+    """Name and title the MCP client declared in its initialize request, if any."""
+    try:
+        params = get_context().session.client_params
+        info = getattr(params, "clientInfo", None)
+        if info is None:
+            return None
+        parts = [getattr(info, "name", None), getattr(info, "title", None)]
+        return " ".join(p for p in parts if p) or None
+    except Exception:
+        return None
 
 
 async def current_caller(cfg: Config, auth) -> Caller:
@@ -193,9 +217,20 @@ async def current_caller(cfg: Config, auth) -> Caller:
         client_name = _client_names[token.client_id]
     headers = get_http_headers(include_all=True)
     ua = headers.get("user-agent", "")
+    mcp_client = _mcp_client_info()
 
-    assistant = _classify(client_name)
-    how = "oauth-client"
+    hints = (mcp_client, client_name, ua)
+    if hints not in _seen_hints:
+        _seen_hints.add(hints)
+        print(f"caller hints: mcp-client={mcp_client!r} oauth-client={client_name!r} user-agent={ua!r}", file=sys.stderr)
+
+    # The MCP initialize clientInfo is the only place a client can say "Claude Code" rather
+    # than the shared "Claude" OAuth client, so it is read first.
+    assistant = _classify(mcp_client)
+    how = "mcp-client"
+    if assistant is None:
+        assistant = _classify(client_name)
+        how = "oauth-client"
     if assistant is None:
         assistant = _classify(ua)
         how = "user-agent"

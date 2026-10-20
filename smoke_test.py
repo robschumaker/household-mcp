@@ -113,6 +113,12 @@ def authenticated(base, token, other_token=None):
     check("get_document unknown name errors with a list", bool(err) and "available" in err, err or "")
     s, out, err = m.call("leave_note", {"for": "chatgpt", "text": "smoke note for chatgpt"})
     check("leave_note for chatgpt", not err and out and out.get("id"), err or "")
+    s, out, err = m.call("leave_note", {"for": "claude-code", "text": "smoke note for claude-code"})
+    check("leave_note for claude-code", not err and out and out.get("for") == "claude-code", err or "")
+    s, out, err = m.call("inbox", {"peek": True, "assistant": "claude-code"})
+    check("claude reads the claude-code inbox", not err and out and out["assistant"] == "claude-code" and out["count"] >= 1, err or str(out))
+    s, out, err = m.call("inbox", {"assistant": "claude-code"})
+    check("claude-code inbox read and cleared", not err and out and out["count"] >= 1, err or str(out))
     s, out, err = m.call("leave_note", {"for": "gemini", "text": "nope"})
     check("leave_note rejects unknown assistant", bool(err), err or "accepted")
     s, out, err = m.call("inbox", {"peek": True})
@@ -144,6 +150,8 @@ def authenticated(base, token, other_token=None):
 
     if other_token:
         o = Mcp(base, other_token)
+        s, out, err = o.call("inbox", {"peek": True, "assistant": "claude-code"})
+        check("chatgpt may not read a claude inbox", bool(err) and "not yours" in err, err or "allowed")
         s, out, err = o.call("inbox", {"peek": True})
         check("other assistant peeks its inbox", not err and out and out["count"] >= 1, err or f"{out}")
         s, out, err = o.call("inbox", {})

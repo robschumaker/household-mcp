@@ -18,7 +18,10 @@ from pathlib import Path
 
 MAX_TEXT = 2000
 MAX_RECALL = 20
-ASSISTANTS = ("claude", "chatgpt")
+# "claude" is the owner's claude.ai Claude (trips, itinerary, household plans); "claude-code" is
+# Claude Code on the owner's laptop (the Pi, this server, laptop work); "chatgpt" is the partner's assistant.
+ASSISTANTS = ("claude", "chatgpt", "claude-code")
+CLAUDE_FAMILY = ("claude", "claude-code")
 TEXT_DOC_SUFFIXES = {".md", ".txt", ".csv", ".json"}
 TOPIC_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 DOC_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,127}$")

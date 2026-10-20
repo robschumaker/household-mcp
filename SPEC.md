@@ -33,7 +33,7 @@ Everything lives under `/home/pi/household/` as plain files you can read with `c
 | --- | --- | --- |
 | `memory/<topic>.md` | Shared facts and decisions, one file per topic (`europe-trip.md`, `household.md`, `people.md`) | Markdown, one fact per line |
 | `documents/` | Files fetched by name: the current prospectus, the trip to-do list, anything either assistant should hand over whole | PDF, Markdown, text |
-| `inbox/<assistant>.jsonl` | Notes left for Claude or for ChatGPT, cleared when read | One JSON object per line |
+| `inbox/<assistant>.jsonl` | Notes left for Claude, for ChatGPT or for Claude Code (`claude-code`), cleared when read | One JSON object per line |
 | `lists/shopping.json` | The canonical grocery list and its Keep mirror state | JSON |
 | `log/writes.jsonl` | Every write, who asked, which assistant, when | One JSON object per line |
 
@@ -58,8 +58,8 @@ Everything is a tool, never an MCP resource, because ChatGPT only consumes tools
 | `remember` | `topic`, `fact` | The stored line as written, with its stamp | Appends one line; a topic that does not exist is created |
 | `list_topics` | none | Topic names with line counts and last-updated dates | Cheap orientation call |
 | `get_document` | `name` | The document's text, or a download link for a PDF | Names come from `documents/`; no path traversal |
-| `leave_note` | `for` (claude or chatgpt), `text` | Confirmation with the note id | Lands in the other assistant's inbox |
-| `inbox` | none | Unread notes for the calling assistant, oldest first | Marks them read; a `peek` flag leaves them |
+| `leave_note` | `for` (claude, chatgpt or claude-code), `text` | Confirmation with the note id | Lands in the other assistant's inbox |
+| `inbox` | optional `assistant`, `peek` | Unread notes for the calling assistant (Claude Code passes `assistant=claude-code`), oldest first | Marks them read; a `peek` flag leaves them |
 
 **Phase 2: lists**
 

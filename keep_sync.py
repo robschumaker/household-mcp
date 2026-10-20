@@ -142,7 +142,7 @@ def sync_shopping(store: Store, glist) -> dict:
                                           **too_many}, indent=1) + "\n")
             store.log_write("keep_sync", SPEAKER, "keep", held=summary)
             if first_time:
-                store.leave_note("claude", f"Keep sync held: the Grocery List mirror would make {summary} in one run "
+                store.leave_note("claude-code", f"Keep sync held: the Grocery List mirror would make {summary} in one run "
                                  f"(limit {HOLD_LIMIT}). See lists/shopping.review.json. Fix up the Keep list or the "
                                  f"canonical list; the mirror resumes on its own.", SPEAKER, "keep")
             return {"held": summary}
