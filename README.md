@@ -12,6 +12,7 @@ A household memory server on the Raspberry Pi: one MCP endpoint that the owner's
 | `sync.sh`, `rclone-filter.txt` | `rclone bisync /home/pi/household gdrive:`; `.env`, `sa.json` and `secrets/` never leave the Pi |
 | `systemd/` | `household-mcp.service`, `household-sync.service` + `household-sync.timer` (every 5 min) |
 | `keep_sync.py` | Google Keep mirror of the shopping list and the House notes dictation inbox, run by `household-keep.timer` every 5 min |
+| `voice/` | Phase 4 voice assistant: `daemon.py` (wake word -> record -> whisper -> Claude -> Piper on the ReSpeaker), `brain.py` (the Claude turn with the store's tools in process), `audio.py`, `bench.py`; runs as `household-voice.service` from `venv-voice` |
 | `scripts/keep_login.py` | One-time, run by the owner on the laptop: opens a Chromium window for Google sign-in, exchanges the oauth_token cookie for the Keep master token, installs it into the Pi's `.env` over SSH |
 | `tests_keep_sync.py` | Fake-Keep unit test for the reconciliation, the 20-item hold and the notes ingest |
 | `install.sh` | Deploy from the laptop: rsync, venv, units, restart |
@@ -58,3 +59,11 @@ Keep token, once, on the laptop (needs `pip install -r requirements-laptop.txt` 
 ```bash
 cd ~/household-mcp && venv/bin/python scripts/keep_login.py
 ```
+
+## Voice (phase 4)
+
+A "Hey Claude" assistant on a Seeed ReSpeaker XVF3800 USB mic array plugged into the Pi, with a speaker on the array's amplifier output so its echo cancellation hears what the Pi says. Pipeline: openWakeWord (`hey_claude.onnx`, Apache-2.0, from huggingface.co/gdiamos/hey-claude) -> energy end-pointed recording -> faster-whisper -> one Claude turn with `recall`, `remember`, `list_topics`, `get_list`, `add_item`, `remove_item`, `leave_note` calling `store.py` directly -> Piper -> the ReSpeaker. After each reply it listens a few more seconds for a follow-up without the wake word, and keeps the conversation for five minutes. Writes are stamped `voice/claude-voice`.
+
+Setup on the Pi, beyond `./install.sh`: `sudo apt install libportaudio2`; put `hey_claude.onnx` and a Piper voice in `/home/pi/voice-models/`; set `ANTHROPIC_API_KEY` and the `VOICE_*` lines in `.env`; `sudo systemctl enable --now household-voice.service`. The daemon exits quietly if the key is missing and fails (and restarts) if the ReSpeaker is not found. `voice/bench.py` times Piper and whisper models without a microphone.
+
+Known wake-word limits of the published model, measured with Piper voices on the laptop: wakes reliably on US voices, misses a British voice entirely, and also wakes on "hey Clyde" and "clawed" (same phonemes). Train a replacement with openWakeWord's `automatic_model_training` notebook if that bites.
