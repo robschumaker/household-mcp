@@ -13,6 +13,7 @@ A household memory server on the Raspberry Pi: one MCP endpoint that the owner's
 | `systemd/` | `household-mcp.service`, `household-sync.service` + `household-sync.timer` (every 5 min) |
 | `keep_sync.py` | Google Keep mirror of the shopping list and the House notes dictation inbox, run by `household-keep.timer` every 5 min |
 | `voice/` | Phase 4 voice assistant: `daemon.py` (wake word -> record -> whisper -> Claude -> Piper on the ReSpeaker), `brain.py` (the Claude turn with the store's tools in process), `audio.py`, `bench.py`; runs as `household-voice.service` from `venv-voice` |
+| `nas_backup.py` | Nightly tar of the store (minus `.env`) uploaded to the Synology NAS at 192.0.2.10, folder `Backups/household`, over the File Station API; 14 dated copies kept; runs from pi's crontab at 03:30 |
 | `scripts/keep_login.py` | One-time, run by the owner on the laptop: opens a Chromium window for Google sign-in, exchanges the oauth_token cookie for the Keep master token, installs it into the Pi's `.env` over SSH |
 | `tests_keep_sync.py` | Fake-Keep unit test for the reconciliation, the 20-item hold and the notes ingest |
 | `install.sh` | Deploy from the laptop: rsync, venv, units, restart |
