@@ -162,7 +162,7 @@ Neither assistant checks the server on its own; each needs a standing order, or 
 
 1. Settings, Connectors, Add custom connector. Name `Household`, URL `https://<pi-funnel-name>.ts.net/mcp`. Sign in with your Google account when prompted.
 2. Enable it for a conversation from the + menu.
-3. Preference line for Claude's memory, saved once the server is live: in any trip, household or shared-plans chat, call `inbox` and `recall` first, record decisions with `remember`, and leave the partner's assistant a note when something changes that she should know.
+3. Preference line for Claude's memory, saved once the server is live: in any trip, household or shared-plans chat, call `inbox` first, passing `topic` when the chat is about one thing (for example europe-december-2026-trip) so other subjects' notes stay out of the way, then `recall`. Record decisions with `remember`. Leave the partner's assistant or Claude Code a note with `leave_note`, tagged with a `topic`, when something changes they should know. Notes are never cleared by reading: when a note's task is done, call `finish_note` with its id.
 
 **ChatGPT (partner)**
 
@@ -172,7 +172,7 @@ Neither assistant checks the server on its own; each needs a standing order, or 
 4. Custom instructions, pasted as written:
 
 ```markdown
-When a conversation involves our household, trips, shared plans, shopping or anything we share, start by calling the Household connector's inbox and recall tools. Record decisions and new facts with remember. If something changes that the owner or their assistant should know, use leave_note for claude. When I add to a shopping list, use add_item and tell me the full list it returns.
+When a conversation involves our household, trips, shared plans, shopping or anything we share, start by calling the Household connector's inbox tool (pass topic when the chat is about one subject, such as europe-december-2026-trip) and then recall. Record decisions and new facts with remember. If something changes that the owner or their assistant should know, use leave_note for claude with a topic tag. Reading the inbox never removes a note: when I have dealt with a note, call finish_note with its id. When I add to a shopping list, use add_item and tell me the full list it returns.
 ```
 
 **Gemini and the speakers**
