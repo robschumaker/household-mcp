@@ -90,10 +90,10 @@ def authenticated(base, token, other_token=None):
     check("initialize", s == 200 and "result" in (r or {}), f"status {s}")
     s, r = m.rpc("tools/list")
     names = sorted(t["name"] for t in (r or {}).get("result", {}).get("tools", []))
-    want = ["add_item", "get_document", "get_list", "inbox", "leave_note", "list_topics", "recall", "remember", "remove_item"]
+    want = ["add_item", "delete_topic", "finish_note", "get_document", "get_list", "inbox", "leave_note", "list_topics", "merge_topics", "recall", "remember", "remove_item"]
     check("tools/list has the nine phase-1 + phase-2 tools", names == want, ", ".join(names))
     sch = {t["name"]: t["inputSchema"] for t in (r or {}).get("result", {}).get("tools", [])}
-    check("leave_note takes `for` and `text`", set(sch.get("leave_note", {}).get("properties", {})) == {"for", "text"})
+    check("leave_note takes `for`, `text` and `topic`", set(sch.get("leave_note", {}).get("properties", {})) == {"for", "text", "topic"})
 
     s, out, err = m.call("remember", {"topic": "Smoke Test", "fact": "smoke test fact  with   spaces"})
     check("remember stores a stamped line", not err and out and out["line"].startswith("- [") and "smoke test fact with spaces" in out["line"], err or out.get("line", ""))

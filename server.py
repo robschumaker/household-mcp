@@ -31,9 +31,12 @@ mcp = FastMCP(
     name="Household",
     instructions=(
         "Shared household memory and lists for the owner's Claude, the partner's ChatGPT and Claude Code on the owner's laptop. "
-        "Start with inbox and recall; record decisions and new facts with remember; use leave_note to tell "
-        "another assistant about changes (for=claude: the owner's claude.ai Claude, trips and household plans; "
-        "for=claude-code: Claude Code, the Pi and laptop work; for=chatgpt: the partner's assistant). Topics are short hyphenated names such as europe-trip, household, people. "
+        "Start with inbox (pass topic when the chat is about one thing, e.g. europe-december-2026-trip) and recall; "
+        "record decisions and new facts with remember; use leave_note, with a topic tag, to tell another assistant "
+        "about changes (for=claude: the owner's claude.ai Claude, trips and household plans; for=claude-code: Claude Code, "
+        "the Pi and laptop work; for=chatgpt: the partner's assistant). inbox never clears notes: when a note's task is done, "
+        "call finish_note with its id. Topics are short hyphenated names such as europe-december-2026-trip, household, people; "
+        "merge_topics and delete_topic tidy them. "
         "The shopping list: add_item, remove_item, get_list; always report the full list a write returns."
     ),
     auth=auth,
@@ -112,30 +115,71 @@ async def leave_note(
                     "household plans), chatgpt (the partner's assistant), claude-code (Claude Code on the owner's laptop: "
                     "the Pi, this server, laptop work)")],
     text: Annotated[str, Field(description="the note, at most 2000 characters")],
+    topic: Annotated[str | None, Field(
+        description="what the note is about, as a memory topic name such as europe-december-2026-trip or "
+                    "household, so the reader can filter its inbox; omit for anything general")] = None,
 ) -> dict:
-    """Leave a note for another assistant (for = claude, chatgpt or claude-code). It lands in
-    that assistant's inbox. Returns the stored note with its id and attribution."""
+    """Leave a note for another assistant (for = claude, chatgpt or claude-code), tagged with a
+    topic when it concerns one. It stays in that assistant's inbox until they finish_note it."""
     c = await _caller()
-    return _wrap(store.leave_note, for_, text, c.user, c.assistant)
+    return _wrap(store.leave_note, for_, text, c.user, c.assistant, topic)
 
 
 @mcp.tool
 async def inbox(
-    peek: bool = False,
+    topic: Annotated[str | None, Field(
+        description="only notes about this topic, plus untagged ones; omit to see every open note")] = None,
     assistant: Annotated[Literal["claude", "chatgpt", "claude-code"] | None, Field(
         description="which inbox to read; defaults to the calling assistant's. Claude Code must pass "
                     "claude-code, because it reaches this server through the same connector as claude.ai")] = None,
+    peek: Annotated[bool, Field(description="ignored; reading never clears notes any more")] = True,
 ) -> dict:
-    """Read unread notes left for the calling assistant, oldest first. Notes are cleared
-    once read; pass peek=true to look without clearing. Claude Code passes assistant=claude-code;
-    notes addressed to claude belong to the owner's claude.ai Claude and should be left for it."""
+    """Open notes left for the calling assistant, oldest first, each with an id. Reading never
+    removes a note: call finish_note(id) once its task is done. Claude Code passes
+    assistant=claude-code; notes addressed to claude belong to the owner's claude.ai Claude."""
     c = await _caller()
     which = assistant or c.assistant
     if which not in ASSISTANTS:
         raise ToolError("could not tell which assistant is calling; pass assistant=claude, chatgpt or claude-code")
     if not c.may_read_inbox(which):
         raise ToolError(f"the {which} inbox is not yours to read (you are {c.assistant})")
-    return _wrap(store.inbox, which, peek, c.user)
+    return _wrap(store.inbox, which, True, c.user, topic)
+
+
+@mcp.tool
+async def finish_note(
+    id: Annotated[str, Field(description="the note id as inbox showed it")],
+    assistant: Annotated[Literal["claude", "chatgpt", "claude-code"] | None, Field(
+        description="whose inbox the note is in; defaults to the calling assistant's (Claude Code passes claude-code)")] = None,
+) -> dict:
+    """Remove one note from your inbox because its task is done. The note is kept in the read log."""
+    c = await _caller()
+    which = assistant or c.assistant
+    if which not in ASSISTANTS:
+        raise ToolError("could not tell which assistant is calling; pass assistant=claude, chatgpt or claude-code")
+    if not c.may_read_inbox(which):
+        raise ToolError(f"the {which} inbox is not yours to finish notes in (you are {c.assistant})")
+    return _wrap(store.finish_note, which, id, c.user, c.assistant)
+
+
+@mcp.tool
+async def merge_topics(
+    sources: Annotated[list[str], Field(description="topics to fold into the target; they are retired afterwards")],
+    into: Annotated[str, Field(description="the topic that keeps everything (created if new)")],
+) -> dict:
+    """Merge memory topics: every line of each source is appended to the target, exact duplicate
+    facts skipped, and the sources are moved out of memory into log/merged-topics. Nothing is erased."""
+    c = await _caller()
+    return _wrap(store.merge_topics, sources, into, c.user, c.assistant)
+
+
+@mcp.tool
+async def delete_topic(
+    topic: Annotated[str, Field(description="the topic to retire")],
+) -> dict:
+    """Retire a whole memory topic. Its file moves to log/deleted-topics, so it can be restored by hand."""
+    c = await _caller()
+    return _wrap(store.delete_topic, topic, c.user, c.assistant)
 
 
 @mcp.tool

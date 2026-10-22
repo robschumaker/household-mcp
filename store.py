@@ -220,38 +220,119 @@ class Store:
             raise StoreError(f"assistant must be one of {', '.join(ASSISTANTS)}")
         return self.inbox_dir / (f"{assistant}.read.jsonl" if read else f"{assistant}.jsonl")
 
-    def leave_note(self, for_assistant: str, text: str, user: str, assistant: str) -> dict:
+    def leave_note(self, for_assistant: str, text: str, user: str, assistant: str, topic: str | None = None) -> dict:
         for_assistant = (for_assistant or "").strip().lower()
         text = clean_text(text, "note")
+        topic = normalize_topic(topic) if topic and topic.strip() else None
         note_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{os.urandom(2).hex()}"
         note = {"id": note_id, "ts": _now_iso(), "for": for_assistant, "from": f"{user}/{assistant}", "text": text}
+        if topic:
+            note["topic"] = topic
         with self._lock, open(self._inbox_path(for_assistant), "a", encoding="utf-8") as f:
             f.write(json.dumps(note, ensure_ascii=False) + "\n")
-        self.log_write("leave_note", user, assistant, note_id=note_id, **{"for": for_assistant})
+        self.log_write("leave_note", user, assistant, note_id=note_id, topic=topic, **{"for": for_assistant})
         return note
 
-    def inbox(self, assistant: str, peek: bool, user: str) -> dict:
+    def _read_notes(self, path: Path) -> list[dict]:
+        notes = []
+        if path.exists():
+            for raw in path.read_text(encoding="utf-8").splitlines():
+                raw = raw.strip()
+                if raw:
+                    try:
+                        notes.append(json.loads(raw))
+                    except json.JSONDecodeError:
+                        notes.append({"id": "?", "text": raw, "from": "?", "ts": "?"})
+        notes.sort(key=lambda n: n.get("ts", ""))
+        return notes
+
+    def inbox(self, assistant: str, peek: bool = True, user: str = "", topic: str | None = None) -> dict:
+        """Open notes for an assistant, oldest first. Never clears anything: a note stays until
+        finish_note(id). With a topic, returns that topic's notes plus untagged ones. peek is
+        accepted for old callers and ignored."""
+        topic = normalize_topic(topic) if topic and topic.strip() else None
+        with self._lock:
+            notes = self._read_notes(self._inbox_path(assistant))
+        if topic:
+            notes = [n for n in notes if n.get("topic") in (None, topic)]
+        return {"assistant": assistant, "count": len(notes), "topic": topic, "notes": notes}
+
+    def finish_note(self, assistant: str, note_id: str, user: str, by_assistant: str) -> dict:
+        """Remove one note from an inbox once its task is done; it is kept in <assistant>.read.jsonl."""
+        note_id = (note_id or "").strip()
         path = self._inbox_path(assistant)
         with self._lock:
-            notes = []
-            if path.exists():
-                for raw in path.read_text(encoding="utf-8").splitlines():
-                    raw = raw.strip()
-                    if raw:
-                        try:
-                            notes.append(json.loads(raw))
-                        except json.JSONDecodeError:
-                            notes.append({"id": "?", "text": raw, "from": "?", "ts": "?"})
-            notes.sort(key=lambda n: n.get("ts", ""))
-            if notes and not peek:
-                with open(self._inbox_path(assistant, read=True), "a", encoding="utf-8") as f:
-                    for n in notes:
-                        n = dict(n, read_ts=_now_iso(), read_by=user)
-                        f.write(json.dumps(n, ensure_ascii=False) + "\n")
-                path.write_text("", encoding="utf-8")
-        if notes and not peek:
-            self.log_write("inbox", user, assistant, cleared=[n.get("id") for n in notes])
-        return {"assistant": assistant, "count": len(notes), "peeked": bool(peek), "notes": notes}
+            notes = self._read_notes(path)
+            keep, done = [], None
+            for n in notes:
+                if done is None and n.get("id") == note_id:
+                    done = n
+                else:
+                    keep.append(n)
+            if done is None:
+                raise StoreError(f"no open note {note_id!r} in the {assistant} inbox")
+            with open(self._inbox_path(assistant, read=True), "a", encoding="utf-8") as f:
+                f.write(json.dumps(dict(done, done_ts=_now_iso(), done_by=f"{user}/{by_assistant}"), ensure_ascii=False) + "\n")
+            path.write_text("".join(json.dumps(n, ensure_ascii=False) + "\n" for n in keep), encoding="utf-8")
+        self.log_write("finish_note", user, by_assistant, note_id=note_id, **{"for": assistant})
+        return {"finished": done, "remaining": len(keep)}
+
+    # ---------- topic housekeeping ----------
+    def _topic_path(self, topic: str) -> Path:
+        topic = normalize_topic(topic)
+        path = self.memory / f"{topic}.md"
+        if not path.is_file():
+            raise StoreError(f"no topic {topic!r}; see list_topics")
+        return path
+
+    def _retire_topic(self, path: Path, reason: str) -> Path:
+        dest = self.log / f"{reason}-topics" / datetime.now().strftime("%Y-%m-%d")
+        dest.mkdir(parents=True, exist_ok=True)
+        target = dest / path.name
+        if target.exists():
+            target = dest / f"{path.stem}-{datetime.now().strftime('%H%M%S')}.md"
+        path.rename(target)
+        return target
+
+    def delete_topic(self, topic: str, user: str, assistant: str) -> dict:
+        """Retire a whole topic. The file is moved under log/deleted-topics/<date>/, not erased."""
+        with self._lock:
+            path = self._topic_path(topic)
+            lines = sum(1 for l in path.read_text(encoding="utf-8").splitlines() if l.startswith("- "))
+            kept = self._retire_topic(path, "deleted")
+        self.log_write("delete_topic", user, assistant, topic=normalize_topic(topic), lines=lines)
+        return {"topic": normalize_topic(topic), "lines": lines, "kept_at": str(kept.relative_to(self.root))}
+
+    def merge_topics(self, sources: list[str], into: str, user: str, assistant: str) -> dict:
+        """Append every line of each source topic to the target (skipping facts the target already
+        has, compared case-insensitively), then retire the sources under log/merged-topics/<date>/."""
+        into_t = normalize_topic(into)
+        srcs = [normalize_topic(t) for t in sources]
+        if into_t in srcs:
+            raise StoreError("a topic cannot be merged into itself")
+        if not srcs:
+            raise StoreError("sources is empty")
+        with self._lock:
+            paths = [self._topic_path(t) for t in srcs]
+            target = self.memory / f"{into_t}.md"
+            existing = target.read_text(encoding="utf-8") if target.is_file() else f"# {into_t}\n\n"
+            have = {(parse_line(l) or {}).get("fact", "").strip().lower() for l in existing.splitlines()}
+            added, skipped = 0, 0
+            out = existing if existing.endswith("\n") else existing + "\n"
+            for path in paths:
+                for l in path.read_text(encoding="utf-8").splitlines():
+                    parsed = parse_line(l)
+                    if not parsed:
+                        continue
+                    if parsed["fact"].strip().lower() in have:
+                        skipped += 1
+                        continue
+                    out += l.rstrip() + "\n"
+                    have.add(parsed["fact"].strip().lower()); added += 1
+            target.write_text(out, encoding="utf-8")
+            kept = [str(self._retire_topic(p, "merged").relative_to(self.root)) for p in paths]
+        self.log_write("merge_topics", user, assistant, sources=srcs, into=into_t, added=added, skipped=skipped)
+        return {"into": into_t, "merged": srcs, "added": added, "skipped_duplicates": skipped, "kept_at": kept}
 
 
 # ---------- lists (phase 2) ----------

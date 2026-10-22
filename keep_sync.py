@@ -195,7 +195,7 @@ def ingest_notes(store: Store, nlist) -> int:
         if not text:
             continue
         try:
-            note = store.leave_note("claude-code", text, SPEAKER, "keep")
+            note = store.leave_note("claude-code", text, SPEAKER, "keep", topic="house-notes")
         except StoreError as e:
             log.warning("skipped House notes entry: %s", e)
             continue
