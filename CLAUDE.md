@@ -14,6 +14,7 @@ Read SPEC.md first. Build **phase 1 only** unless the owner says otherwise.
 - Drive mirror: `rclone bisync /home/pi/household gdrive:Household` on a systemd timer every 5 minutes, with a filter file that excludes `.env` and anything under `secrets/`. The `gdrive` remote is configured by the owner; do not run `rclone config` yourself. First run needs `--resync`.
 
 ## Secrets
+- No personal names, email addresses, LAN addresses, hostnames or account ids in the repo or its commit messages: say "the owner" and "the partner", and read addresses from `.env` (`.env.example` uses documentation addresses). The history was scrubbed on 2026-10-24; keep it that way.
 - Never commit `.env`. Never print its contents. Never ask the owner to paste a secret into this session; they fill `/home/pi/household/.env` themselves from `.env.example`.
 - The Keep master token (phase 2) is the owner's to generate. Do not script a Google login with their password.
 
