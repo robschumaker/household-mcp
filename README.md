@@ -64,3 +64,7 @@ cd ~/household-mcp && venv/bin/python scripts/keep_login.py
 ## Voice (phase 4)
 
 The voice assistant is its own piece, documented in `voice/README.md`, and published separately from this repo (its directory's history is pushed with `git subtree push --prefix=voice public master`). Its unit is `voice/systemd/household-voice.service`, its requirements `voice/requirements.txt`; `./install.sh` deploys both with the rest.
+
+## License
+
+MIT; see `LICENSE`.
