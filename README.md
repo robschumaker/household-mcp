@@ -12,8 +12,6 @@ A household memory server on the Raspberry Pi: one MCP endpoint that the owner's
 | `sync.sh`, `rclone-filter.txt` | `rclone bisync /home/pi/household gdrive:`; `.env`, `sa.json` and `secrets/` never leave the Pi |
 | `systemd/` | `household-mcp.service`, `household-sync.service` + `household-sync.timer` (every 5 min) |
 | `keep_sync.py` | Google Keep mirror of the shopping list and the House notes dictation inbox, run by `household-keep.timer` every 5 min |
-| `voice/` | Phase 4 voice assistant: `daemon.py` (wake word -> record -> whisper -> Claude -> Piper on the ReSpeaker), `brain.py` (the Claude turn with the store's tools in process), `audio.py`, `bench.py`; runs as `household-voice.service` from `venv-voice` |
-| `nas_backup.py` | Nightly tar of the store (minus `.env`) uploaded to the Synology NAS at 192.0.2.10, folder `Backups/household`, over the File Station API; 14 dated copies kept; runs from pi's crontab at 03:30 |
 | `scripts/keep_login.py` | One-time, run by the owner on the laptop: opens a Chromium window for Google sign-in, exchanges the oauth_token cookie for the Keep master token, installs it into the Pi's `.env` over SSH |
 | `tests_keep_sync.py` | Fake-Keep unit test for the reconciliation, the 20-item hold and the notes ingest |
 | `install.sh` | Deploy from the laptop: rsync, venv, units, restart |
@@ -61,9 +59,9 @@ Keep token, once, on the laptop (needs `pip install -r requirements-laptop.txt` 
 cd ~/household-mcp && venv/bin/python scripts/keep_login.py
 ```
 
-## Voice (phase 4)
+## Related
 
-The voice assistant is its own piece, documented in `voice/README.md`, and published separately from this repo (its directory's history is pushed with `git subtree push --prefix=voice public master`). Its unit is `voice/systemd/household-voice.service`, its requirements `voice/requirements.txt`; `./install.sh` deploys both with the rest.
+The "Hey Claude" voice assistant that uses this store as its tools is a separate project, hey-claude-pi; it attaches the store through a small stdio MCP server.
 
 ## License
 
